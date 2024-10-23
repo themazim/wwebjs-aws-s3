@@ -1,7 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const AWS = require('@aws-sdk/client-s3')
-const { S3Client, ListObjectsCommand, PutObjectCommand, HeadObjectCommand, GetObjectCommand, DeleteObjectCommand } = AWS
+const { ListObjectsCommand, PutObjectCommand, HeadObjectCommand, GetObjectCommand, DeleteObjectCommand } = AWS
 
 class AwsS3Store {
   /**
@@ -20,7 +20,7 @@ class AwsS3Store {
   constructor({ bucketName, remoteDataPath, s3Client } = {}) {
     if (!bucketName) throw new Error("A valid bucket name is required for AwsS3Store.");
     if (!remoteDataPath) throw new Error("A valid remote dir path is required for AwsS3Store.");
-    // if (!s3Client) throw new Error("A valid S3Client instance is required for AwsS3Store.");
+    if (!s3Client) throw new Error("A valid S3Client instance is required for AwsS3Store.");
     this.bucketName = bucketName;
     this.remoteDataPath = remoteDataPath;
     this.s3Client = s3Client;
@@ -195,7 +195,4 @@ class AwsS3Store {
   }
 }
 
-module.exports = {
-  AwsS3Store,
-  S3Client
-};
+module.exports = AwsS3Store;
