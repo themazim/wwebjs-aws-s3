@@ -27,7 +27,7 @@ class AwsS3Store {
     this.debugEnabled = process.env.STORE_DEBUG === 'true';
   }
 
-  async isValidConfig (options) {
+  async isValidConfig(options) {
     if (!options.session) {
       console.log('Error: A valid session is required for AwsS3Store.')
       return false
@@ -89,25 +89,79 @@ class AwsS3Store {
 
     const remoteFilePath = path.join(this.remoteDataPath, `${options.session}.zip`).replace(/\\/g, '/');
     options.remoteFilePath = remoteFilePath;
-    
+
     // await this.#deletePrevious(options);
-    
+
     try {
-      const fileStream = fs.createReadStream(`${options.session}.zip`);
-      const params = {
+      // Initialize multipart upload
+      const createMultipartUpload = await this.s3Client.send(new CreateMultipartUploadCommand({
         Bucket: this.bucketName,
         Key: remoteFilePath,
-        Body: fileStream,
         ACL: 'private',
         ContentType: 'application/zip'
-      };
-      await this.s3Client.send(new PutObjectCommand(params));
+      }));
+
+      const uploadId = createMultipartUpload.UploadId;
+      const partSize = 1024 * 1024 * 1; // 1GB per part * 1024
+      const fileStream = fs.createReadStream(`${options.session}.zip`);
+
+      let partNumber = 1;
+      let parts = [];
+      let buffer = [];
+
+      // Process the file stream in chunks
+      for await (const chunk of fileStream) {
+        buffer.push(chunk);
+        const bufferSize = Buffer.concat(buffer).length;
+
+        if (bufferSize >= partSize) {
+          const uploadPartResponse = await this.s3Client.send(new UploadPartCommand({
+            Bucket: this.bucketName,
+            Key: remoteFilePath,
+            UploadId: uploadId,
+            PartNumber: partNumber,
+            Body: Buffer.concat(buffer)
+          }));
+
+          parts.push({
+            PartNumber: partNumber,
+            ETag: uploadPartResponse.ETag
+          });
+
+          partNumber++;
+          buffer = [];
+        }
+      }
+
+      // Upload any remaining data
+      if (buffer.length > 0) {
+        const uploadPartResponse = await this.s3Client.send(new UploadPartCommand({
+          Bucket: this.bucketName,
+          Key: remoteFilePath,
+          UploadId: uploadId,
+          PartNumber: partNumber,
+          Body: Buffer.concat(buffer)
+        }));
+
+        parts.push({
+          PartNumber: partNumber,
+          ETag: uploadPartResponse.ETag
+        });
+      }
+
+      // Complete the multipart upload
+      await this.s3Client.send(new CompleteMultipartUploadCommand({
+        Bucket: this.bucketName,
+        Key: remoteFilePath,
+        UploadId: uploadId,
+        MultipartUpload: { Parts: parts }
+      }));
+
       this.debugLog(`[METHOD: save] File saved. PATH='${remoteFilePath}'.`);
     } catch (error) {
       this.debugLog(`[METHOD: save] Error: ${error.message}`);
-      throw error;      
+      throw error;
     }
-
   }
 
   async extract(options) {
@@ -129,7 +183,7 @@ class AwsS3Store {
           .on('error', reject)
           .on('finish', resolve);
       });
-  
+
       this.debugLog(`[METHOD: extract] File extracted. REMOTE_PATH='${remoteFilePath}', LOCAL_PATH='${options.path}'.`);
     } catch (error) {
       this.debugLog(`[METHOD: extract] Error: ${error.message}`);
@@ -155,7 +209,7 @@ class AwsS3Store {
       if (err.name === 'NoSuchKey' || err.name === 'NotFound') {
         this.debugLog(`[METHOD: delete] File not found. PATH='${remoteFilePath}'.`);
         return;
-      } 
+      }
       this.debugLog(`[METHOD: delete] Error: ${err.message}`);
       // throw err;
       return
