@@ -102,7 +102,7 @@ class AwsS3Store {
       }));
 
       const uploadId = createMultipartUpload.UploadId;
-      const partSize = 1024 * 1024 * 1; // 1GB per part * 1024
+      const partSize = 1024 * 1024 * 1024; // 1GB per part * 1024
       const fileStream = fs.createReadStream(`${options.session}.zip`);
 
       let partNumber = 1;
