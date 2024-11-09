@@ -1,7 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const AWS = require('@aws-sdk/client-s3')
-const { ListObjectsCommand, PutObjectCommand, HeadObjectCommand, GetObjectCommand, DeleteObjectCommand } = AWS
+const { ListObjectsCommand, PutObjectCommand, HeadObjectCommand, GetObjectCommand, DeleteObjectCommand, CreateMultipartUploadCommand, CompleteMultipartUploadCommand, UploadPartCommand } = AWS
 
 class AwsS3Store {
   /**
