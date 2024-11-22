@@ -98,24 +98,17 @@ class AwsS3Store {
       // If file is smaller than part size, do regular upload
       if (fileSize <= partSize) {
         console.log('[S3 Store] Uploading Single File ' + `${options.session}.zip`);
-        // Use streaming upload instead of reading entire file into memory
-        const fileStream = fs.createReadStream(`${options.session}.zip`);
+        const fileContent = fs.readFileSync(`${options.session}.zip`);
         await this.s3Client.send(new PutObjectCommand({
           Bucket: this.bucketName,
           Key: remoteFilePath,
-          Body: fileStream,
+          Body: fileContent,
           ContentType: 'application/zip',
-          // Enable acceleration, compression and parallel uploads
+          // Add upload acceleration and compression
           AccelerateConfiguration: {
             Status: 'Enabled'
           },
-          ContentEncoding: 'gzip',
-          // Enable parallel uploads for better performance
-          ServerSideEncryption: 'AES256', // Encrypt data in transit
-          StorageClass: 'STANDARD', // Use standard storage for faster access
-          // Set a higher multipart threshold for better performance
-          PartSize: 10 * 1024 * 1024, // 10MB parts
-          queueSize: 4, // Number of parallel upload threads
+          ContentEncoding: 'gzip'
         }));
       } else {
 
