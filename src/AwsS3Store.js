@@ -98,11 +98,11 @@ class AwsS3Store {
       // If file is smaller than part size, do regular upload
       if (fileSize <= partSize) {
         console.log('[S3 Store] Uploading Single File ' + `${options.session}.zip`);
-        const fileContent = fs.readFileSync(`${options.session}.zip`);
+        const fileStream = fs.createReadStream(`${options.session}.zip`);
         await this.s3Client.send(new PutObjectCommand({
           Bucket: this.bucketName,
           Key: remoteFilePath,
-          Body: fileContent,
+          Body: fileStream,
           ContentType: 'application/zip',
           // Add upload acceleration and compression
           AccelerateConfiguration: {
