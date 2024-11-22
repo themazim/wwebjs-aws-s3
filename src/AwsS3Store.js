@@ -90,31 +90,77 @@ class AwsS3Store {
     const remoteFilePath = path.join(this.remoteDataPath, `${options.session}.zip`).replace(/\\/g, '/');
     options.remoteFilePath = remoteFilePath;
 
-    // await this.#deletePrevious(options);
-
     try {
-      // Initialize multipart upload
-      const createMultipartUpload = await this.s3Client.send(new CreateMultipartUploadCommand({
-        Bucket: this.bucketName,
-        Key: remoteFilePath,
-        ACL: 'private',
-        ContentType: 'application/zip'
-      }));
+      const stats = fs.statSync(`${options.session}.zip`);
+      const fileSize = stats.size;
+      const partSize = 1024 * 1024 * 1024 * 4; // 4GB per part
 
-      const uploadId = createMultipartUpload.UploadId;
-      const partSize = 1024 * 1024 * 1024; // 1GB per part * 1024
-      const fileStream = fs.createReadStream(`${options.session}.zip`);
+      // If file is smaller than part size, do regular upload
+      if (fileSize <= partSize) {
+        console.log('[S3 Store] Uploading Single File ' + `${options.session}.zip`);
+        // Use streaming upload instead of reading entire file into memory
+        const fileStream = fs.createReadStream(`${options.session}.zip`);
+        await this.s3Client.send(new PutObjectCommand({
+          Bucket: this.bucketName,
+          Key: remoteFilePath,
+          Body: fileStream,
+          ContentType: 'application/zip',
+          // Enable acceleration, compression and parallel uploads
+          AccelerateConfiguration: {
+            Status: 'Enabled'
+          },
+          ContentEncoding: 'gzip',
+          // Enable parallel uploads for better performance
+          ServerSideEncryption: 'AES256', // Encrypt data in transit
+          StorageClass: 'STANDARD', // Use standard storage for faster access
+          // Set a higher multipart threshold for better performance
+          PartSize: 10 * 1024 * 1024, // 10MB parts
+          queueSize: 4, // Number of parallel upload threads
+        }));
+      } else {
 
-      let partNumber = 1;
-      let parts = [];
-      let buffer = [];
+        console.log('[S3 Store] Uploading Multiepart File ' + `${options.session}.zip`);
+        // Initialize multipart upload for large files
+        const createMultipartUpload = await this.s3Client.send(new CreateMultipartUploadCommand({
+          Bucket: this.bucketName,
+          Key: remoteFilePath,
+          ACL: 'private',
+          ContentType: 'application/zip'
+        }));
 
-      // Process the file stream in chunks
-      for await (const chunk of fileStream) {
-        buffer.push(chunk);
-        const bufferSize = Buffer.concat(buffer).length;
+        const uploadId = createMultipartUpload.UploadId;
+        const fileStream = fs.createReadStream(`${options.session}.zip`);
 
-        if (bufferSize >= partSize) {
+        let partNumber = 1;
+        let parts = [];
+        let buffer = [];
+
+        // Process the file stream in chunks
+        for await (const chunk of fileStream) {
+          buffer.push(chunk);
+          const bufferSize = Buffer.concat(buffer).length;
+
+          if (bufferSize >= partSize) {
+            const uploadPartResponse = await this.s3Client.send(new UploadPartCommand({
+              Bucket: this.bucketName,
+              Key: remoteFilePath,
+              UploadId: uploadId,
+              PartNumber: partNumber,
+              Body: Buffer.concat(buffer)
+            }));
+
+            parts.push({
+              PartNumber: partNumber,
+              ETag: uploadPartResponse.ETag
+            });
+
+            partNumber++;
+            buffer = [];
+          }
+        }
+
+        // Upload any remaining data
+        if (buffer.length > 0) {
           const uploadPartResponse = await this.s3Client.send(new UploadPartCommand({
             Bucket: this.bucketName,
             Key: remoteFilePath,
@@ -127,35 +173,16 @@ class AwsS3Store {
             PartNumber: partNumber,
             ETag: uploadPartResponse.ETag
           });
-
-          partNumber++;
-          buffer = [];
         }
-      }
 
-      // Upload any remaining data
-      if (buffer.length > 0) {
-        const uploadPartResponse = await this.s3Client.send(new UploadPartCommand({
+        // Complete the multipart upload
+        await this.s3Client.send(new CompleteMultipartUploadCommand({
           Bucket: this.bucketName,
           Key: remoteFilePath,
           UploadId: uploadId,
-          PartNumber: partNumber,
-          Body: Buffer.concat(buffer)
+          MultipartUpload: { Parts: parts }
         }));
-
-        parts.push({
-          PartNumber: partNumber,
-          ETag: uploadPartResponse.ETag
-        });
       }
-
-      // Complete the multipart upload
-      await this.s3Client.send(new CompleteMultipartUploadCommand({
-        Bucket: this.bucketName,
-        Key: remoteFilePath,
-        UploadId: uploadId,
-        MultipartUpload: { Parts: parts }
-      }));
 
       this.debugLog(`[METHOD: save] File saved. PATH='${remoteFilePath}'.`);
     } catch (error) {
