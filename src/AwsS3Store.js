@@ -93,10 +93,10 @@ class AwsS3Store {
     try {
       const stats = fs.statSync(`${options.session}.zip`);
       const fileSize = stats.size;
-      const partSize = 1024 * 1024 * 1024 * 4; // 4GB per part
+      const partSize = 1024 * 1024 * 20;
 
       // If file is smaller than part size, do regular upload
-      if (fileSize <= partSize) {
+      if (fileSize <= (1024 * 1024 * 1024 * 4)) {
         console.log('[S3 Store] Uploading Single File ' + `${options.session}.zip`);
         const fileStream = fs.createReadStream(`${options.session}.zip`);
         await this.s3Client.send(new PutObjectCommand({
